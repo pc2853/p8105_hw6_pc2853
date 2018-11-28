@@ -12,6 +12,7 @@ library(broom)
 library(modelr)
 library(lubridate)
 library(patchwork)
+library(mgcv)
 
 knitr::opts_chunk$set(echo = TRUE, 
                       fig.width = 6,
@@ -20,7 +21,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       )
 ```
 
-Problem 1 
+### Problem 1 
 
 ```{r}
 homicide_data = 
@@ -81,5 +82,69 @@ homicide_OR %>%
     y = "Odds Ratio"
   ) + 
   theme(axis.text.x = element_text(angle = 90))
+```
+
+### Problem 2
+
+```{r message=FALSE}
+birthweight_data = 
+  read_csv('data/birthweight.csv') %>%
+  mutate(babysex = as.factor(babysex), 
+         frace = as.factor(frace),
+         mrace = as.factor(mrace),
+         malform = as.factor(malform),
+         partiy = as.factor(parity))
+```
+
+I’m going to use linear regression model, as a data-driven prediction without actually knowing the underlying processes between the output and the predictors. 
+
+```{r}
+p2_fit = 
+  lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = birthweight_data)
+p2_fit %>% 
+  broom::tidy()
+
+birthweight_data %>% 
+  add_predictions(p2_fit) %>% 
+  add_residuals(p2_fit) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.4) +
+  labs(
+    title = "residuals against fitted values for birthweight value",
+    x = "fitted Values", 
+    y = "residuals"
+  )
+```
+
+Cross validation
+
+```{r}
+
+cv_df = 
+  crossv_mc(birthweight_data, n = 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble))
+cv_df = 
+  cv_df %>% 
+  mutate(mlr_all  = map(train, ~lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = .x)),
+         mlr_1 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+         mlr_2 = map(train, ~lm(bwt ~ bhead*blength*babysex, data = .x))
+  ) %>% 
+  mutate(rmse_mlr_all = map2_dbl(mlr_all,  test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_1 = map2_dbl(mlr_1, test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_2 = map2_dbl(mlr_2, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  gather(key = model, value = rmse) %>% 
+  mutate(model = str_replace(model, "rmse_", ""),
+         model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin() + 
+  labs(
+    title = "Cross validation",
+    x = "linear models", 
+    y = "root mean squares-rmse"
+  )
 ```
 
